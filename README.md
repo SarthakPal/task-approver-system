@@ -1,5 +1,5 @@
 Engineering: Multi user approval Assignment
-1. 1. Postgres Database and Login:
+1. Postgres Database and Login:
       ● Create a PostgresSQL database to store user information such as name and email.
       ● Develop a login APIs that allows users to sign up and assigns them an internal
       login ID.

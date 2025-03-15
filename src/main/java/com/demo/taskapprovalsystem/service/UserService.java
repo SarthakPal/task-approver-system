@@ -1,6 +1,7 @@
 package com.demo.taskapprovalsystem.service;
 
 import com.demo.taskapprovalsystem.entity.User;
+import com.demo.taskapprovalsystem.mapper.UserRegistrationMapper;
 import com.demo.taskapprovalsystem.repository.UserRepository;
 import com.demo.taskapprovalsystem.request.CreateUserRequest;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -14,30 +15,38 @@ public class UserService {
     private UserRepository userRepository;
 
     @Autowired
-    private PasswordEncoder passwordEncoder; // To hash passwords
+    private PasswordEncoder passwordEncoder;
 
-    // Method to create a new user
+
+    /**
+     * Registers a new user.
+     *
+     * @param createUserRequest The user details from the client to be saved.
+     * @return The registered User entity.
+     */
     public User registerUser(CreateUserRequest createUserRequest) {
-        // Check if the user with the given email already exists
+
         if (userRepository.findByEmail(createUserRequest.getEmail()).isPresent()) {
             throw new RuntimeException("User with this email already exists");
         }
 
-        // Generate an internal login ID (for example, use the email prefix)
         String loginId = generateLoginId(createUserRequest.getEmail());
-
-        // Hash the password
         String hashedPassword = passwordEncoder.encode(createUserRequest.getPassword());
 
-        // Create and save the user
+        UserRegistrationMapper.INSTANCE.mapToUserWithDynamicFields(createUserRequest, loginId, hashedPassword);
+
         User user = new User(createUserRequest.getName(), createUserRequest.getEmail(), hashedPassword, loginId);
         return userRepository.save(user);
     }
 
-    // Helper method to generate an internal login ID
+    /**
+     * Generates a login ID based on the email (simple example)
+     *
+     * @param email The user's email.
+     * @return The generated login ID.
+     */
     private String generateLoginId(String email) {
         // Here, we are using the part before the "@" of the email as the login ID.
-        // You can customize this logic to suit your needs.
         return email.split("@")[0];
     }
 }

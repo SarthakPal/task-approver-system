@@ -21,7 +21,7 @@ public class LoginController {
     private AuthenticationManager authenticationManager;
 
     @Autowired
-    private JwtTokenProvider jwtTokenProvider; // A custom class for generating JWT tokens (optional)
+    private JwtTokenProvider jwtTokenProvider;
 
     @PostMapping("/login")
     public ResponseEntity<?> login(@RequestBody LoginRequest loginRequest) {
@@ -29,8 +29,8 @@ public class LoginController {
                 new UsernamePasswordAuthenticationToken(loginRequest.getUserName(), loginRequest.getPassword())
         );
 
-        //SecurityContextHolder.getContext().setAuthentication(authentication);
-        String jwt = jwtTokenProvider.generateToken(loginRequest.getUserName()); // Assuming you are using JWT
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+        String jwt = jwtTokenProvider.generateToken(loginRequest.getUserName());
 
         return ResponseEntity.ok(new JwtResponse(jwt));
     }

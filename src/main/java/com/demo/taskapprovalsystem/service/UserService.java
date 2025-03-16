@@ -1,6 +1,7 @@
 package com.demo.taskapprovalsystem.service;
 
 import com.demo.taskapprovalsystem.entity.User;
+import com.demo.taskapprovalsystem.exception.UserRegistrationException;
 import com.demo.taskapprovalsystem.mapper.UserRegistrationMapper;
 import com.demo.taskapprovalsystem.repository.UserRepository;
 import com.demo.taskapprovalsystem.request.CreateUserRequest;
@@ -27,7 +28,7 @@ public class UserService {
     public User registerUser(CreateUserRequest createUserRequest) {
 
         if (userRepository.findByEmail(createUserRequest.getEmail()).isPresent()) {
-            throw new RuntimeException("User with this email already exists");
+            throw new UserRegistrationException("User with this email already exists");
         }
 
         String loginId = generateLoginId(createUserRequest.getEmail());

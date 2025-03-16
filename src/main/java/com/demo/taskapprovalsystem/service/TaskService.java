@@ -1,8 +1,10 @@
 package com.demo.taskapprovalsystem.service;
 
+import com.demo.taskapprovalsystem.constants.ApplicationConstants;
 import com.demo.taskapprovalsystem.entity.Task;
 import com.demo.taskapprovalsystem.entity.TaskApproverMapping;
 import com.demo.taskapprovalsystem.entity.User;
+import com.demo.taskapprovalsystem.exception.*;
 import com.demo.taskapprovalsystem.repository.TaskApproverMappingRepository;
 import com.demo.taskapprovalsystem.repository.TaskRepository;
 import com.demo.taskapprovalsystem.repository.UserRepository;
@@ -18,99 +20,120 @@ import java.util.List;
 public class TaskService {
 
     @Autowired
-    private TaskRepository taskRepository;  // Task repository to save task
+    private TaskRepository taskRepository;
     @Autowired
-    private TaskApproverMappingRepository taskApproverMappingRepository;  // To save task-approver mappings
+    private TaskApproverMappingRepository taskApproverMappingRepository;
     @Autowired
-    private UserRepository userRepository;  // To fetch user details based on user IDs
+    private UserRepository userRepository;
     @Autowired
-    private EmailService emailService;  // To send email notifications
+    private EmailService emailService;
 
+    /**
+     * Creates a new task and assigns approvers to it.
+     *
+     * This method receives a **CreateTaskRequest** object containing the task details, such as task name, creator, and approvers.
+     * It first fetches the **creator** from the user repository based on the provided **createdBy** field. Then, it creates a
+     * new task, sets its properties, and saves it to the database. After that, it assigns **approvers** to the task, creates
+     * task-approver mappings, and saves them. Finally, it sends an asynchronous email notification to the approvers about the new task.
+     *
+     * @param createTaskRequest The request object containing task details, including the task name, creator ID, and list of approvers.
+     * @return The created **Task** object, saved and with assigned approvers.
+     * @throws CreatorNotFoundException If the creator is not found in the system or if an unexpected error occurs during task creation.
+     */
     @Transactional
     public Task createTask(CreateTaskRequest createTaskRequest) {
-        // Step 1: Fetch the creator (User entity) using the 'createdBy' field
-        User creator = userRepository.findById(createTaskRequest.getCreatedBy())
-                .orElseThrow(() -> new RuntimeException("Creator not found"));
 
-        // Step 2: Create a new Task
+        User creator = userRepository.findById(createTaskRequest.getCreatedBy())
+                .orElseThrow(() -> new CreatorNotFoundException("Creator not found with ID: " + createTaskRequest.getCreatedBy()));
+
         Task task = new Task();
         task.setTaskName(createTaskRequest.getTaskName());
         task.setCreator(creator);
         task.setCreatedDate(LocalDateTime.now());
-        task.setStatus("CREATED");  // Initially, the task is "Pending"
+        task.setStatus(ApplicationConstants.CREATED);
 
-        // Save the task
         Task savedTask = taskRepository.save(task);
 
-        // Step 3: Fetch the approvers (User entities) based on 'approvedBy' field
         List<User> approvers = userRepository.findAllById(createTaskRequest.getApprovedBy());
 
-        // Step 4: Create TaskApproverMapping entries
         for (User approver : approvers) {
             TaskApproverMapping mapping = new TaskApproverMapping();
             mapping.setTask(savedTask);
             mapping.setApprover(approver);
-            mapping.setStatus("PENDING");
+            mapping.setStatus(ApplicationConstants.PENDING);
             mapping.setCreatedAt(LocalDateTime.now());
             taskApproverMappingRepository.save(mapping);
         }
 
-        // Step 5: Send email notification to the approver asynchronously
         emailService.sendApprovalNotifications(approvers, savedTask);
 
-
-        // Step 6: Return the created task
         return savedTask;
     }
 
-
+    /**
+     * Approves a task by an approver and updates its status.
+     *
+     * This method allows an approver to approve a task. It first checks if the **task** and **approver** exist. Then,
+     * it verifies if the approver is authorized to approve the task. Upon successful approval, it updates the
+     * **`TaskApproverMapping`** status to "APPROVED" and records the approval timestamp. If all approvers have approved the task,
+     * the task's status is updated to "ALL_APPROVED" and an email notification is sent to the task creator and all approvers.
+     * Otherwise, the task status is updated to "PENDING" or "PARTIALLY APPROVED".
+     *
+     * @param taskId The ID of the task to be approved.
+     * @param approverId The ID of the user who is approving the task.
+     * @return The updated **Task** object with the updated status.
+     * @throws RuntimeException If the task or approver is not found, or if the approver is not authorized to approve the task.
+     */
     @Transactional
     public Task approveTask(Long taskId, Long approverId) {
-        // Step 1: Fetch the task and the approver
+
         Task task = taskRepository.findById(taskId)
-                .orElseThrow(() -> new RuntimeException("Task not found"));
+                .orElseThrow(() -> new TaskNotFoundException(ApplicationConstants.TASK_NOT_FOUND));
         User approver = userRepository.findById(approverId)
-                .orElseThrow(() -> new RuntimeException("Approver not found"));
+                .orElseThrow(() -> new UserNotFoundException(ApplicationConstants.APPROVER_NOT_FOUND));
 
-        // Step 2: Check if the approver is in the list of approvers for the task
         TaskApproverMapping mapping = taskApproverMappingRepository.findByTaskAndApprover(task, approver)
-                .orElseThrow(() -> new RuntimeException("Approver is not authorized to approve this task"));
+                .orElseThrow(() -> new ApproverNotAuthorizedException(ApplicationConstants.APPROVER_NOT_AUTHORIZED));
 
-        // Step 3: Set the approval date and mark the task as approved by this approver
-        mapping.setStatus("APPROVED");
+        mapping.setStatus(ApplicationConstants.APPROVED);
         mapping.setApprovedAt(LocalDateTime.now());
         taskApproverMappingRepository.save(mapping);
 
-        // Send email to the task creator notifying them of the approval
         emailService.sendApprovalNotificationToCreator(task, approver);
 
-        // Step 4: Check if all approvers have approved the task
         if (allApproversApproved(task)) {
-            // If all approvers have approved, update task status to 'All Approved'
-            task.setStatus("ALL_APPROVED");
+
+            task.setStatus(ApplicationConstants.ALL_APPROVED);
             taskRepository.save(task);
 
-            // Notify all users (task creator and approvers) that the task is fully approved
             emailService.sendAllApproversApprovalNotification(task);
         } else {
-            // If not all approvers have approved, update task status to 'Pending' or 'Partially Approved'
-            task.setStatus("PENDING");
+            task.setStatus(ApplicationConstants.PENDING);
             taskRepository.save(task);
         }
 
-        // Step 5: Return the updated task
         return task;
     }
 
+
+    /**
+     * Checks if all approvers have approved the task.
+     *
+     * This method verifies if every approver associated with the given task has approved it.
+     * It queries the **`TaskApproverMapping`** entries for the task and counts the number of approvers whose status is "APPROVED".
+     * If the count of approvers who have approved the task matches the total number of approvers, it returns **true**.
+     * Otherwise, it returns **false** indicating that not all approvers have approved the task.
+     *
+     * @param task The task object for which the approval status of all approvers needs to be checked.
+     * @return **true** if all approvers have approved the task; **false** otherwise.
+     */
     private boolean allApproversApproved(Task task) {
-        // Check if all approvers have approved the task
         List<TaskApproverMapping> mappings = taskApproverMappingRepository.findByTask(task);
         long approvedCount = mappings.stream()
-                .filter(mapping -> mapping.getApprovedAt() != null)  // Count approvers who have approved
+                .filter(mapping -> mapping.getStatus().equals(ApplicationConstants.APPROVED))
                 .count();
-        return approvedCount == mappings.size();  // If the number of approved matches total approvers
+        return approvedCount == mappings.size();
     }
-
 
 }
 
